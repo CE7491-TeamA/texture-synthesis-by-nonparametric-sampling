@@ -75,6 +75,18 @@ def gaussian_kernel(winsize: int, sigma: float = 1.0, mu: float = 0.0):
     return g
 
 
+def plot_kernel(kernel):
+    sx, sy = kernel.shape
+    x, y = np.meshgrid(np.linspace(-1, 1, sx), np.linspace(-1, 1, sy))
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    surf = ax.plot_surface(x, y, kernel, cmap='bwr', linewidth=0)
+    fig.colorbar(surf)
+    ax.set_title("Kernel Plot")
+    fig.show()
+    
+
 def texture_synthesis(img: np.array, winsize: int, scale: float = 1.5, eps: float = 0.1, visualize: bool = False, progress_dir: str = None):
     assert(winsize % 2 == 1)
     halfwinsize = winsize//2
@@ -83,18 +95,18 @@ def texture_synthesis(img: np.array, winsize: int, scale: float = 1.5, eps: floa
     target, target_filled = initialize(img, scale, halfwinsize)
 
     # WARN: do not forget to write values for all these variables
-    # img_padded = np.pad(img, halfwinsize, 'reflect')
+    # img_padded = np.pad(img, (halfwinsize, halfwinsize), 'reflect')
     target_padded = np.pad(
-        target, halfwinsize, 'constant', constant_values=0)
+        target, (halfwinsize, halfwinsize), 'constant', constant_values=0)
     target_filled_padded = np.pad(
-        target_filled, halfwinsize, 'constant', constant_values=0)
+        target_filled, (halfwinsize, halfwinsize), 'constant', constant_values=0)
 
     # cache sample textures
     sampletextures, vsamplepos = cache_sample_textures(img, winsize)
 
-    g = gaussian_kernel(winsize, sigma=0.8)
+    g = gaussian_kernel(winsize, sigma=winsize/6.4)
 
-    from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
+    # from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
     iprogress = 0
     while np.sum(target_filled) < np.size(target):
     #if True:
@@ -103,13 +115,14 @@ def texture_synthesis(img: np.array, winsize: int, scale: float = 1.5, eps: floa
         # indices = ([r1, r2, ...], [c1, c2, ...])
         indices = np.nonzero(binary_dilation(target_filled) - target_filled)
 
-        # fill the pixel first where more number of surrounding pixels is known
+        # fill the pixel first where more number of surrounding pixels are known
         vknownpixels = np.zeros(len(indices[0]))
         for i, (r, c) in enumerate(zip(*indices)):
             vknownpixels[i] = np.sum(
                 target_filled[r-halfwinsize:r+halfwinsize+1, c-halfwinsize:c+halfwinsize+1])
         fillingorder = np.flip(np.argsort(vknownpixels))
 
+        #from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
         for i in tqdm(fillingorder):
             # for every filling pixel
             r, c = indices[0][i], indices[1][i]
@@ -126,9 +139,21 @@ def texture_synthesis(img: np.array, winsize: int, scale: float = 1.5, eps: floa
             minssd = min(ssd)
 
             pixels = []
+            sampleindices = []
+            threshold = minssd*(1.0 + eps)
             for isample, err in enumerate(ssd):
-                if err < minssd*(1.0 + eps):
+                if err < threshold:
                     pixels.append(sampletextures[isample][halfwinsize+1, halfwinsize+1])
+                    sampleindices.append(isample)
+
+            plt.subplot(2, len(pixels), 1)
+            plt.imshow(target_cropped)
+            for j, isample in enumerate(sampleindices):
+                plt.subplot(2, len(pixels), len(pixels)+j+1)
+                plt.xlabel('sample '+ str(vsamplepos[isample]))
+                plt.imshow(sampletextures[isample])
+            plt.show()
+            #log.info(f'pixel candidates: {len(pixels)}')
             assert(len(pixels) != 0)
 
             # uniform sampling
