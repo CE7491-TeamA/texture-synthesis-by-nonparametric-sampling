@@ -22,14 +22,18 @@ log.setLevel(logging.DEBUG)
 log.addHandler(console)
 
 
+g_eps = 1e-8
+
 def load_image(path: pathlib.Path):
     # img = np.array(Image.open(path).convert('RGB'))
     img = np.array(Image.open(path).convert('L')) / 255.0
     return img
 
+
 def save_image(img: np.array, path: pathlib.Path):
     newimg = Image.fromarray(img*255).convert('L')
     newimg.save(str(path))
+
 
 def show_image(img: np.array):
     plt.imshow(img, cmap='gray', vmin=0.0, vmax=1.0)
@@ -107,77 +111,80 @@ def texture_synthesis(img: np.array, winsize: int, scale: float = 1.5, eps: floa
 
     # from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
     iprogress = 0
-    while np.sum(target_filled) < np.size(target):
-    #if True:
-        log.info(f'filled pixels: {int(np.sum(target_filled))}/{np.size(target)}')
-        # take the contour of filled img
-        # indices = ([r1, r2, ...], [c1, c2, ...])
-        indices = np.nonzero(binary_dilation(target_filled) - target_filled)
+    with tqdm(total=np.size(target)) as progressbar:
+        #if True:
+        n_last_filled = 0
+        while np.sum(target_filled) < np.size(target):
+            #log.info(f'filled pixels: {int(np.sum(target_filled))}/{np.size(target)}')
+            progressbar.set_description(f'filled pixels: {int(np.sum(target_filled))}/{np.size(target)}')
+            progressbar.update(np.sum(target_filled) - n_last_filled)
+            n_last_filled = np.sum(target_filled)
 
-        # fill the pixel first where more number of surrounding pixels are known
-        vknownpixels = np.zeros(len(indices[0]))
-        for i, (r, c) in enumerate(zip(*indices)):
-            vknownpixels[i] = np.sum(
-                target_filled[r-halfwinsize:r+halfwinsize+1, c-halfwinsize:c+halfwinsize+1])
-        fillingorder = np.flip(np.argsort(vknownpixels))
+            # take the contour of filled img
+            # indices = ([r1, r2, ...], [c1, c2, ...])
+            indices = np.nonzero(binary_dilation(target_filled) - target_filled)
 
-        for i in tqdm(fillingorder):
-            # for every filling pixel
-            r, c = indices[0][i], indices[1][i]
-            # NOTE: r - halfwinsize (padding) + halfwinsize (half of window size) = r
-            target_cropped = target_padded[r:r+winsize, c:c+winsize]
-            mask = target_filled_padded[r:r+winsize, c:c+winsize]
-            weight = np.multiply(g, mask)
+            # fill the pixel first where more number of surrounding pixels are known
+            vknownpixels = np.zeros(len(indices[0]))
+            for i, (r, c) in enumerate(zip(*indices)):
+                vknownpixels[i] = np.sum(target_filled_padded[r:r+winsize, c:c+winsize])
+            fillingorder = np.flip(np.argsort(vknownpixels))
 
-            # compute SSD for every pair of sampletexture and target_cropped
-            distance = (sampletextures - target_cropped)**2  # [# of samples, H, W]
-            distance_filtered = (distance*weight) / np.sum(weight)  # [# of samples, H, W]
-            # flatten 2-dimentional distance and compute summation
-            ssd = np.sum(np.reshape(distance_filtered, (distance_filtered.shape[0], -1)), axis=1)  # [# of samples])
-            minssd = min(ssd)
+            for i in tqdm(fillingorder, leave=False):
+                # for every filling pixel
+                r, c = indices[0][i], indices[1][i]
+                # NOTE: r - halfwinsize (padding) + halfwinsize (half of window size) = r
+                target_cropped = target_padded[r:r+winsize, c:c+winsize]
+                mask = target_filled_padded[r:r+winsize, c:c+winsize]
+                weight = np.multiply(g, mask)
 
-            pixels = []
-            sampleindices = []
-            threshold = minssd*(1.0 + eps)
-            for isample, err in enumerate(ssd):
-                if err < threshold:
-                    pixels.append(sampletextures[isample][halfwinsize+1, halfwinsize+1])
-                    sampleindices.append(isample)
+                # compute SSD for every pair of sampletexture and target_cropped
+                distance = (sampletextures - target_cropped)**2  # [# of samples, H, W]
+                distance_filtered = (distance*weight) / np.sum(weight)  # [# of samples, H, W]
+                # flatten 2-dimentional distance and compute summation
+                ssd = np.sum(np.reshape(distance_filtered, (distance_filtered.shape[0], -1)), axis=1)  # [# of samples])
+                minssd = min(ssd)
 
-            # debugging code to check sampled textures
-            #  plt.subplot(2, len(pixels), 1)
-            #  plt.imshow(target_cropped, cmap='gray', vmin=0.0, vmax=1.0)
-            #  for j, isample in enumerate(sampleindices):
-            #      plt.subplot(2, len(pixels), len(pixels)+j+1)
-            #      plt.xlabel('sample '+ str(vsamplepos[isample]))
-            #      plt.imshow(sampletextures[isample], cmap='gray', vmin=0.0, vmax=1.0)
-            #  plt.pause(0.0001)
-            #  # from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
-            #  plt.clf()
-            #log.info(f'pixel candidates: {len(pixels)}')
-            assert(len(pixels) != 0)
+                pixels = []
+                sampleindices = []
+                threshold = minssd*(1.0 + eps)
+                for isample, err in enumerate(ssd):
+                    if err < threshold + g_eps:
+                        pixels.append(sampletextures[isample][halfwinsize, halfwinsize])
+                        sampleindices.append(isample)
 
-            # uniform sampling
-            p = np.random.choice(pixels)
-            target[r, c] = p
-            target_padded[r+halfwinsize, c+halfwinsize] = p
-            target_filled[r, c] = 1
-            target_filled_padded[r+halfwinsize, c+halfwinsize] = 1
+                # debugging code to check sampled textures
+                #  plt.subplot(2, len(pixels), 1)
+                #  plt.imshow(target_cropped, cmap='gray', vmin=0.0, vmax=1.0)
+                #  for j, isample in enumerate(sampleindices):
+                #      plt.subplot(2, len(pixels), len(pixels)+j+1)
+                #      plt.xlabel('sample '+ str(vsamplepos[isample]))
+                #      plt.imshow(sampletextures[isample], cmap='gray', vmin=0.0, vmax=1.0)
+                #  plt.pause(0.0001)
+                #  # from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
+                #  plt.clf()
+                #log.info(f'pixel candidates: {len(pixels)}')
+                assert(len(pixels) != 0)
 
-            if visualize:
-                plt.imshow(target, cmap='gray', vmin=0.0, vmax=1.0)
-                # draw_circle = plt.Circle((r, c), 3, fill=False)
-                plt.plot(c, r, marker='o')
-                plt.pause(0.0001)
-                plt.clf()
-        iprogress += 1
-        if progress_dir is not None:
-            progressimg = Image.fromarray(target*255).convert('L')
-            dir = pathlib.Path(progress_dir)
-            dir.mkdir(exist_ok=True)
-            progressimg.save(str(dir / (('%010d' % iprogress) + '.png')))
-            
-    from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
+                # uniform sampling
+                p = np.random.choice(pixels)
+                target[r, c] = p
+                target_padded[r+halfwinsize, c+halfwinsize] = p
+                target_filled[r, c] = 1
+                target_filled_padded[r+halfwinsize, c+halfwinsize] = 1
+
+                if visualize:
+                    plt.imshow(target, cmap='gray', vmin=0.0, vmax=1.0)
+                    plt.plot(c, r, marker='o')
+                    plt.pause(0.0001)
+                    plt.clf()
+            iprogress += 1
+            if progress_dir is not None:
+                progressimg = Image.fromarray(target*255).convert('L')
+                dir = pathlib.Path(progress_dir)
+                dir.mkdir(exist_ok=True)
+                progressimg.save(str(dir / (('%010d' % iprogress) + '.png')))
+
     return target
 
 
