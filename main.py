@@ -22,7 +22,6 @@ log.setLevel(logging.DEBUG)
 log.addHandler(console)
 
 
-
 def load_image(path: pathlib.Path):
     # img = np.array(Image.open(path).convert('RGB'))
     img = np.array(Image.open(path).convert('L')) / 255.0
@@ -33,7 +32,7 @@ def save_image(img: np.array, path: pathlib.Path):
     newimg.save(str(path))
 
 def show_image(img: np.array):
-    plt.imshow(img)
+    plt.imshow(img, cmap='gray', vmin=0.0, vmax=1.0)
     plt.show()
 
 
@@ -122,7 +121,6 @@ def texture_synthesis(img: np.array, winsize: int, scale: float = 1.5, eps: floa
                 target_filled[r-halfwinsize:r+halfwinsize+1, c-halfwinsize:c+halfwinsize+1])
         fillingorder = np.flip(np.argsort(vknownpixels))
 
-        #from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
         for i in tqdm(fillingorder):
             # for every filling pixel
             r, c = indices[0][i], indices[1][i]
@@ -146,24 +144,28 @@ def texture_synthesis(img: np.array, winsize: int, scale: float = 1.5, eps: floa
                     pixels.append(sampletextures[isample][halfwinsize+1, halfwinsize+1])
                     sampleindices.append(isample)
 
-            plt.subplot(2, len(pixels), 1)
-            plt.imshow(target_cropped)
-            for j, isample in enumerate(sampleindices):
-                plt.subplot(2, len(pixels), len(pixels)+j+1)
-                plt.xlabel('sample '+ str(vsamplepos[isample]))
-                plt.imshow(sampletextures[isample])
-            plt.show()
+            # debugging code to check sampled textures
+            #  plt.subplot(2, len(pixels), 1)
+            #  plt.imshow(target_cropped, cmap='gray', vmin=0.0, vmax=1.0)
+            #  for j, isample in enumerate(sampleindices):
+            #      plt.subplot(2, len(pixels), len(pixels)+j+1)
+            #      plt.xlabel('sample '+ str(vsamplepos[isample]))
+            #      plt.imshow(sampletextures[isample], cmap='gray', vmin=0.0, vmax=1.0)
+            #  plt.pause(0.0001)
+            #  # from IPython.terminal import embed; ipshell = embed.InteractiveShellEmbed(config=embed.load_default_config())(local_ns=locals())
+            #  plt.clf()
             #log.info(f'pixel candidates: {len(pixels)}')
             assert(len(pixels) != 0)
 
             # uniform sampling
             p = np.random.choice(pixels)
             target[r, c] = p
+            target_padded[r+halfwinsize, c+halfwinsize] = p
             target_filled[r, c] = 1
             target_filled_padded[r+halfwinsize, c+halfwinsize] = 1
 
             if visualize:
-                plt.imshow(target)
+                plt.imshow(target, cmap='gray', vmin=0.0, vmax=1.0)
                 # draw_circle = plt.Circle((r, c), 3, fill=False)
                 plt.plot(c, r, marker='o')
                 plt.pause(0.0001)
